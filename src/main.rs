@@ -89,7 +89,6 @@ impl HelloTriangleApplication {
     }
 
     fn main_loop(self) {
-        let mut done = false;
         self.event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
 
@@ -111,9 +110,6 @@ impl HelloTriangleApplication {
         //         done = true
         //     }
         // });
-        if done {
-            return;
-        }
     }
 }
 
