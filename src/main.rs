@@ -4,7 +4,14 @@ extern crate vulkano_win;
 
 use std::sync::Arc;
 
-use vulkano::instance::{Instance, InstanceExtensions, ApplicationInfo, Version, layers_list};
+use vulkano::instance::{
+    Instance, 
+    InstanceExtensions, 
+    ApplicationInfo, 
+    Version, 
+    layers_list,
+    PhysicalDevice,
+};
 use vulkano::instance::debug::{DebugCallback, MessageType, MessageSeverity};
 
 use winit::{
@@ -24,6 +31,16 @@ const VALIDATION_LAYERS: &[&str] = &[
 const ENABLE_VALIDATION_LAYERS: bool = true;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
+
+struct QueueFamilyIndices {
+    graphics_family: i32,
+}
+
+impl QueueFamilyIndices {
+    fn new() -> Self {
+        Self { graphics_family: -1 }
+    }
+}
 
 #[allow(unused)]
 struct HelloTriangleApplication {
