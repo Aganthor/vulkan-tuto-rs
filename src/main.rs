@@ -64,8 +64,10 @@ impl HelloTriangleApplication {
         let required_extensions = Self::get_required_extensions();
 
         if ENABLE_VALIDATION_LAYERS && Self::check_validation_layer_support() {
-            Instance::new(Some(&app_info), &required_extensions, VALIDATION_LAYERS.iter().clone())
-                .expect("failed to create Vulkan instance")
+            // Instance::new(Some(&app_info), &required_extensions, VALIDATION_LAYERS.iter().clone())
+            //     .expect("failed to create Vulkan instance")
+            Instance::new(Some(&app_info), &required_extensions, None)
+                .expect("failed to create a Vulkan instance")            
         } else {
             Instance::new(Some(&app_info), &required_extensions, None)
                 .expect("failed to create a Vulkan instance")
@@ -117,6 +119,7 @@ impl HelloTriangleApplication {
         }).ok()
     }
 
+    #[allow(unused)]
     fn main_loop(self) {
         self.event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
@@ -138,5 +141,5 @@ impl HelloTriangleApplication {
 }
 
 fn main() {
-    let mut app = HelloTriangleApplication::initialize();
+    let mut _app = HelloTriangleApplication::initialize();
 }
