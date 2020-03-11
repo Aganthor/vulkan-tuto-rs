@@ -4,8 +4,8 @@ extern crate vulkano_win;
 
 use std::sync::Arc;
 
-use vulkano::instance::{Instance, InstanceExtensions, ApplicationInfo, Version};
-use vulkano::instance::debug::{DebugCallback, MessageType};
+use vulkano::instance::{Instance, InstanceExtensions, ApplicationInfo, Version, layers_list};
+use vulkano::instance::debug::{DebugCallback, MessageType, MessageSeverity};
 
 use winit::{
     event::{Event, WindowEvent},
@@ -46,6 +46,10 @@ impl HelloTriangleApplication {
     }
 
     fn create_instance() -> Arc<Instance> {
+        if ENABLE_VALIDATION_LAYERS && !Self::check_validation_layer_support() {
+            println!("Validation layers requested, but not available!")
+        }
+
         let supported_extensions = InstanceExtensions::supported_by_core()
             .expect("failed to retrieve supported extensions");
         println!("Supported extensions: {:?}", supported_extensions);
@@ -57,9 +61,30 @@ impl HelloTriangleApplication {
             engine_version: Some(Version { major: 1, minor: 0, patch: 0}),
         };
 
-        let required_extensions = vulkano_win::required_extensions();
-        Instance::new(Some(&app_info), &required_extensions, None)
-            .expect("failed to create a Vulkan instance")
+        let required_extensions = Self::get_required_extensions();
+
+        if ENABLE_VALIDATION_LAYERS && Self::check_validation_layer_support() {
+            Instance::new(Some(&app_info), &required_extensions, VALIDATION_LAYERS.iter().clone())
+                .expect("failed to create Vulkan instance")
+        } else {
+            Instance::new(Some(&app_info), &required_extensions, None)
+                .expect("failed to create a Vulkan instance")
+        }
+    }
+
+    fn check_validation_layer_support() -> bool {
+        let layers: Vec<_> = layers_list().unwrap().map(|l| l.name().to_owned()).collect();
+        VALIDATION_LAYERS.iter()
+            .all(|layer_name| layers.contains(&layer_name.to_string()))
+    }
+
+    fn get_required_extensions() -> InstanceExtensions {
+        let mut extensions = vulkano_win::required_extensions();
+        if ENABLE_VALIDATION_LAYERS {
+            extensions.ext_debug_utils = true;
+        }
+
+        extensions
     }
 
     fn init_window() -> EventLoop<()> {
@@ -76,14 +101,18 @@ impl HelloTriangleApplication {
             return None;
         }
 
-        let msg_types = MessageType {
+        let msg_severity = MessageSeverity {
             error: true,
             warning: true,
-            performance_warning: true,
             information: true,
-            debug: true,
+            verbose: true,
         };
-        DebugCallback::new(&instance, msg_types, |msg| {
+        let msg_types = MessageType {
+            general: true,
+            validation: true,
+            performance:true,
+        };
+        DebugCallback::new(&instance, msg_severity, msg_types, |msg| {
             println!("validation layer: {:?}", msg.description);
         }).ok()
     }
@@ -105,15 +134,9 @@ impl HelloTriangleApplication {
                 _ => ()
             }
         });
-        // self.event_loop.poll_events(|ev| {
-        //     if let Event::WindowEvent {event: WindowEvent::CloseRequested, .. } = ev {
-        //         done = true
-        //     }
-        // });
     }
 }
 
 fn main() {
     let mut app = HelloTriangleApplication::initialize();
-    //app.main_loop();
 }
