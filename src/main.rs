@@ -158,5 +158,6 @@ impl HelloTriangleApplication {
 }
 
 fn main() {
-    let mut _app = HelloTriangleApplication::initialize();
+    let mut app = HelloTriangleApplication::initialize();
+    //app.main_loop();
 }
