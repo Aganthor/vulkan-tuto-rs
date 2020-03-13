@@ -40,6 +40,10 @@ impl QueueFamilyIndices {
     fn new() -> Self {
         Self { graphics_family: -1 }
     }
+
+    fn is_complete(&self) -> bool {
+        self.graphics_family >= 0
+    }
 }
 
 #[allow(unused)]
@@ -47,6 +51,8 @@ struct HelloTriangleApplication {
     instance: Arc<Instance>,
     debug_callback: Option<DebugCallback>,
     event_loop: EventLoop<()>,
+
+    physical_device_index: usize, //Can't store PhysicalDevice directly (lifetime issues)
 }
 
 impl HelloTriangleApplication {
@@ -54,11 +60,13 @@ impl HelloTriangleApplication {
         let instance = Self::create_instance();
         let debug_callback = Self::setup_debug_callback(&instance);
         let event_loop = Self::init_window();
+        let physical_device_index = Self::pick_physical_device(&instance);
 
         Self {
             instance,
             debug_callback,
             event_loop,
+            physical_device_index,
         }
     }
 
@@ -82,7 +90,7 @@ impl HelloTriangleApplication {
 
         if ENABLE_VALIDATION_LAYERS && Self::check_validation_layer_support() {
             // Instance::new(Some(&app_info), &required_extensions, VALIDATION_LAYERS.iter().clone())
-            //     .expect("failed to create Vulkan instance")
+            //      .expect("failed to create Vulkan instance")
             Instance::new(Some(&app_info), &required_extensions, None)
                 .expect("failed to create a Vulkan instance")            
         } else {
@@ -134,6 +142,33 @@ impl HelloTriangleApplication {
         DebugCallback::new(&instance, msg_severity, msg_types, |msg| {
             println!("validation layer: {:?}", msg.description);
         }).ok()
+    }
+
+    fn pick_physical_device(instance: &Arc<Instance>) -> usize {
+        PhysicalDevice::enumerate(&instance)
+            .position(|device| Self::is_device_suitable(&device))
+            .expect("failed to find a suitable GPU!")
+    }
+
+    fn is_device_suitable(device: &PhysicalDevice) -> bool {
+        let indices = Self::find_queue_families(device);
+        indices.is_complete()
+    }
+
+    fn find_queue_families(device: &PhysicalDevice) -> QueueFamilyIndices {
+        let mut indices = QueueFamilyIndices::new();
+        //TODO: replace index with id to simplify?
+        for (i, queue_family) in device.queue_families().enumerate() {
+            if queue_family.supports_graphics() {
+                indices.graphics_family = i as i32;
+            }
+
+            if indices.is_complete() {
+                break;
+            }
+        }
+
+        indices
     }
 
     #[allow(unused)]
