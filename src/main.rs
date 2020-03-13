@@ -13,6 +13,7 @@ use vulkano::instance::{
     PhysicalDevice,
 };
 use vulkano::instance::debug::{DebugCallback, MessageType, MessageSeverity};
+use vulkano::device::{Device, DeviceExtensions, Queue, Features};
 
 use winit::{
     event::{Event, WindowEvent},
@@ -53,6 +54,9 @@ struct HelloTriangleApplication {
     event_loop: EventLoop<()>,
 
     physical_device_index: usize, //Can't store PhysicalDevice directly (lifetime issues)
+    device: Arc<Device>,
+
+    graphics_queue: Arc<Queue>,
 }
 
 impl HelloTriangleApplication {
@@ -61,12 +65,15 @@ impl HelloTriangleApplication {
         let debug_callback = Self::setup_debug_callback(&instance);
         let event_loop = Self::init_window();
         let physical_device_index = Self::pick_physical_device(&instance);
+        let (device, graphics_queue) = Self::create_logical_device(&instance, physical_device_index);
 
         Self {
             instance,
             debug_callback,
             event_loop,
             physical_device_index,
+            device,
+            graphics_queue,
         }
     }
 
@@ -169,6 +176,27 @@ impl HelloTriangleApplication {
         }
 
         indices
+    }
+
+    fn create_logical_device(
+        instance: &Arc<Instance>,
+        physical_device_index: usize,
+    ) -> (Arc<Device>, Arc<Queue>) {
+        let physical_device = PhysicalDevice::from_index(&instance, physical_device_index).unwrap();
+        let indices = Self::find_queue_families(&physical_device);
+
+        let queue_family = physical_device.queue_families()
+            .nth(indices.graphics_family as usize).unwrap();
+
+        let queue_priority = 1.0;
+
+        let (device, mut queues) = Device::new(physical_device, &Features::none(), &DeviceExtensions::none(),
+    [(queue_family, queue_priority)].iter().cloned())
+            .expect("failed to create logical device!");
+
+            let graphics_queue = queues.next().unwrap();
+
+            (device, graphics_queue)
     }
 
     #[allow(unused)]
