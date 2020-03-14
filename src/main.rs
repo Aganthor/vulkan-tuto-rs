@@ -1,7 +1,3 @@
-/*extern crate vulkano;
-extern crate winit;
-extern crate vulkano_win;*/
-
 use std::sync::Arc;
 use std::collections::HashSet;
 
@@ -15,7 +11,20 @@ use vulkano::instance::{
 };
 use vulkano::instance::debug::{DebugCallback, MessageType, MessageSeverity};
 use vulkano::device::{Device, DeviceExtensions, Queue, Features};
-use vulkano::swapchain::{Surface,};
+use vulkano::swapchain::{
+    Surface,
+    Capabilities,
+    ColorSpace,
+    SupportedPresentModes,
+    PresentMode,
+    Swapchain,
+    CompositeAlpha,
+    FullscreenExclusive,
+};
+use vulkano::format::Format;
+use vulkano::image::{ImageUsage, swapchain::SwapchainImage};
+use vulkano::sync::SharingMode;
+
 use vulkano_win::VkSurfaceBuild;
 
 use winit::{
@@ -30,6 +39,14 @@ const HEIGHT: u32 = 600;
 const VALIDATION_LAYERS: &[&str] = &[
     "VK_LAYER_LUNARG_standard_validation"
 ];
+
+/// Required device extensions
+fn device_extensions() -> DeviceExtensions {
+    DeviceExtensions {
+        khr_swapchain: true,
+        .. vulkano::device::DeviceExtensions::none()
+    }
+}
 
 #[cfg(all(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = true;
@@ -64,6 +81,9 @@ struct HelloTriangleApplication {
 
     graphics_queue: Arc<Queue>,
     present_queue: Arc<Queue>,
+
+    swap_chain: Arc<Swapchain<Window>>,
+    swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
 }
 
 impl HelloTriangleApplication {
@@ -71,9 +91,12 @@ impl HelloTriangleApplication {
         let instance = Self::create_instance();
         let debug_callback = Self::setup_debug_callback(&instance);
         let (event_loop, surface) = Self::create_surface(&instance);
-        
+
         let physical_device_index = Self::pick_physical_device(&instance, &surface);
         let (device, graphics_queue, present_queue) = Self::create_logical_device(&instance, &surface, physical_device_index);
+
+        let (swap_chain, swap_chain_images) = Self::create_swap_chain(&instance, &surface, physical_device_index,
+            &device, &graphics_queue, &present_queue);
 
         Self {
             instance,
@@ -87,6 +110,9 @@ impl HelloTriangleApplication {
 
             graphics_queue,
             present_queue,
+
+            swap_chain,
+            swap_chain_images,
         }
     }
 
@@ -173,6 +199,91 @@ impl HelloTriangleApplication {
     fn is_device_suitable(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> bool {
         let indices = Self::find_queue_families(surface, device);
         indices.is_complete()
+    }
+
+    fn choose_swap_surface_format(available_formats: &[(Format, ColorSpace)]) -> (Format, ColorSpace) {
+        *available_formats.iter()
+            .find(|(format, color_space)|
+                *format == Format::B8G8R8A8Unorm && *color_space == ColorSpace::SrgbNonLinear
+            )
+            .unwrap_or_else(|| &available_formats[0])
+    }
+
+    fn choose_swap_present_mode(available_present_modes: SupportedPresentModes) -> PresentMode {
+        if available_present_modes.mailbox {
+            PresentMode::Mailbox
+        } else if available_present_modes.immediate {
+            PresentMode::Immediate
+        } else {
+            PresentMode::Fifo
+        }
+    }
+
+    fn choose_swap_extent(capabilities: &Capabilities) -> [u32; 2] {
+        if let Some(current_extent) = capabilities.current_extent {
+            return current_extent
+        } else {
+            let mut actual_extent = [WIDTH, HEIGHT];
+            actual_extent[0] = capabilities.min_image_extent[0]
+                .max(capabilities.max_image_extent[0].min(actual_extent[0]));
+            actual_extent[1] = capabilities.min_image_extent[1]
+                .max(capabilities.max_image_extent[1].min(actual_extent[1]));
+            actual_extent
+        }
+    }
+
+    fn create_swap_chain(
+        instance: &Arc<Instance>,
+        surface: &Arc<Surface<Window>>,
+        physical_device_index: usize,
+        device: &Arc<Device>,
+        graphics_queue: &Arc<Queue>,
+        present_queue: &Arc<Queue>,
+    ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
+        let physical_device = PhysicalDevice::from_index(&instance, physical_device_index).unwrap();
+        let capabilities = surface.capabilities(physical_device)
+            .expect("failed to create surface capabilities");
+
+        let surface_format = Self::choose_swap_surface_format(&capabilities.supported_formats);
+        let present_mode = Self::choose_swap_present_mode(capabilities.present_modes);
+        let extent = Self::choose_swap_extent(&capabilities);
+
+        let mut image_count = capabilities.min_image_count + 1;
+        if capabilities.max_image_count.is_some() && image_count > capabilities.max_image_count.unwrap() {
+            image_count = capabilities.max_image_count.unwrap();
+        }
+
+        let image_usage = ImageUsage {
+            color_attachment: true,
+            .. ImageUsage::none()
+        };
+
+        let indices = Self::find_queue_families(&surface, &physical_device);
+
+        let sharing: SharingMode = if indices.graphics_family != indices.present_family {
+            vec![graphics_queue, present_queue].as_slice().into()
+        } else {
+            graphics_queue.into()
+        };
+
+        let (swap_chain, images) = Swapchain::new(
+            device.clone(),
+            surface.clone(),
+            image_count,
+            surface_format.0,
+            extent,
+            1,
+            image_usage,
+            sharing,
+            capabilities.current_transform,
+            CompositeAlpha::Opaque,
+            present_mode,
+            FullscreenExclusive::Default,
+            true, //clipped
+            ColorSpace::SrgbNonLinear,
+        ).expect("failed to create a swap chain!");
+
+        (swap_chain, images)
     }
 
     fn find_queue_families(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> QueueFamilyIndices {
