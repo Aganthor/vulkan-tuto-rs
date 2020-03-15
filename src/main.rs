@@ -98,6 +98,8 @@ impl HelloTriangleApplication {
         let (swap_chain, swap_chain_images) = Self::create_swap_chain(&instance, &surface, physical_device_index,
             &device, &graphics_queue, &present_queue);
 
+        Self::create_graphics_pipeline(&device);
+
         Self {
             instance,
             debug_callback,
@@ -284,6 +286,27 @@ impl HelloTriangleApplication {
         ).expect("failed to create a swap chain!");
 
         (swap_chain, images)
+    }
+
+    fn create_graphics_pipeline(device: &Arc<Device>) {
+        mod vertex_shader {
+            vulkano_shaders::shader! {
+                ty: "vertex",
+                path: "src/assets/shaders/vert_shader.vert"
+            }
+        }
+
+        mod fragment_shader {
+            vulkano_shaders::shader! {
+                ty: "fragment",
+                path: "src/assets/shaders/frag_shader.frag"
+            }
+        }
+
+        let _vert_shader_module = vertex_shader::Shader::load(device.clone())
+            .expect("failed to create vertex shader module!");
+        let _frag_shader_module = fragment_shader::Shader::load(device.clone())
+            .expect("failed to create fragment shader module!");
     }
 
     fn find_queue_families(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> QueueFamilyIndices {
