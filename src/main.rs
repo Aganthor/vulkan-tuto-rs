@@ -1,3 +1,4 @@
+#[macro_use]
 use std::sync::Arc;
 use std::collections::HashSet;
 
@@ -24,6 +25,16 @@ use vulkano::swapchain::{
 use vulkano::format::Format;
 use vulkano::image::{ImageUsage, swapchain::SwapchainImage};
 use vulkano::sync::SharingMode;
+use vulkano::pipeline::{
+    GraphicsPipeline,
+    vertex::BufferlessDefinition,
+    viewport::Viewport,
+};
+use vulkano::framebuffer::{
+    RenderPassAbstract,
+    Subpass,
+};
+use vulkano::descriptor::PipelineLayoutAbstract;
 
 use vulkano_win::VkSurfaceBuild;
 
@@ -68,6 +79,10 @@ impl QueueFamilyIndices {
     }
 }
 
+type ConcreteGraphicsPipeline = GraphicsPipeline<BufferlessDefinition, 
+                                                Box<PipelineLayoutAbstract + Send + Sync + 'static>, 
+                                                Arc<RenderPassAbstract + Send + Sync + 'static>>;
+
 #[allow(unused)]
 struct HelloTriangleApplication {
     instance: Arc<Instance>,
@@ -84,6 +99,9 @@ struct HelloTriangleApplication {
 
     swap_chain: Arc<Swapchain<Window>>,
     swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
+
+    render_pass: Arc<RenderPassAbstract + Send + Sync>,
+    graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
 }
 
 impl HelloTriangleApplication {
@@ -98,7 +116,8 @@ impl HelloTriangleApplication {
         let (swap_chain, swap_chain_images) = Self::create_swap_chain(&instance, &surface, physical_device_index,
             &device, &graphics_queue, &present_queue);
 
-        Self::create_graphics_pipeline(&device);
+        let render_pass = Self::create_render_pass(&device, swap_chain.format());
+        let graphics_pipeline = Self::create_graphics_pipeline(&device, swap_chain.dimensions(), &render_pass);
 
         Self {
             instance,
@@ -115,6 +134,9 @@ impl HelloTriangleApplication {
 
             swap_chain,
             swap_chain_images,
+
+            render_pass,
+            graphics_pipeline,
         }
     }
 
@@ -137,10 +159,8 @@ impl HelloTriangleApplication {
         let required_extensions = Self::get_required_extensions();
 
         if ENABLE_VALIDATION_LAYERS && Self::check_validation_layer_support() {
-            // Instance::new(Some(&app_info), &required_extensions, VALIDATION_LAYERS.iter().clone())
-            //      .expect("failed to create Vulkan instance")
-            Instance::new(Some(&app_info), &required_extensions, None)
-                .expect("failed to create a Vulkan instance")            
+            Instance::new(Some(&app_info), &required_extensions, VALIDATION_LAYERS.iter().cloned())
+                .expect("failed to create Vulkan instance")
         } else {
             Instance::new(Some(&app_info), &required_extensions, None)
                 .expect("failed to create a Vulkan instance")
@@ -167,7 +187,8 @@ impl HelloTriangleApplication {
         let surface = WindowBuilder::new()
             .with_title("Vulkan")
             .with_inner_size(LogicalSize::new(f64::from(WIDTH), f64::from(HEIGHT)))
-            .build_vk_surface(&event_loop, instance.clone()).unwrap();
+            .build_vk_surface(&event_loop, instance.clone())
+            .expect("failed to create window surface!");
         (event_loop, surface)
     }
 
@@ -200,7 +221,24 @@ impl HelloTriangleApplication {
 
     fn is_device_suitable(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> bool {
         let indices = Self::find_queue_families(surface, device);
-        indices.is_complete()
+        let extensions_supported = Self::check_device_extension_support(device);
+
+        let swap_chain_adequate = if extensions_supported {
+            let capabilities = surface.capabilities(*device)
+                .expect("failed to get surface capabilities");
+                !capabilities.supported_formats.is_empty() &&
+                    capabilities.present_modes.iter().next().is_some()
+            } else {
+                false
+            };
+
+        indices.is_complete() && extensions_supported &&swap_chain_adequate
+    }
+
+    fn check_device_extension_support(device: &PhysicalDevice) -> bool {
+        let available_extensions = DeviceExtensions::supported_by_device(*device);
+        let device_extensions = device_extensions();
+        available_extensions.intersection(&device_extensions) == device_extensions
     }
 
     fn choose_swap_surface_format(available_formats: &[(Format, ColorSpace)]) -> (Format, ColorSpace) {
@@ -288,7 +326,28 @@ impl HelloTriangleApplication {
         (swap_chain, images)
     }
 
-    fn create_graphics_pipeline(device: &Arc<Device>) {
+    fn create_render_pass(device: &Arc<Device>, color_format: Format) -> Arc<RenderPassAbstract + Send + Sync> {
+        Arc::new(vulkano::single_pass_renderpass!(device.clone(),
+            attachments: {
+                color: {
+                    load: Clear,
+                    store: Store,
+                    format: color_format,
+                    samples: 1,
+                }
+            },
+            pass: {
+                color: [color],
+                depth_stencil: {}
+            }
+        ).unwrap())
+    }
+
+    fn create_graphics_pipeline(
+        device: &Arc<Device>, 
+        swap_chain_extent: [u32; 2], 
+        render_pass: &Arc<RenderPassAbstract + Send + Sync>,
+    ) -> Arc<ConcreteGraphicsPipeline> {
         mod vertex_shader {
             vulkano_shaders::shader! {
                 ty: "vertex",
@@ -307,6 +366,31 @@ impl HelloTriangleApplication {
             .expect("failed to create vertex shader module!");
         let _frag_shader_module = fragment_shader::Shader::load(device.clone())
             .expect("failed to create fragment shader module!");
+
+        let dimensions = [swap_chain_extent[0] as f32, swap_chain_extent[1] as f32];
+        let viewport = Viewport {
+            origin: [0.0, 0.0],
+            dimensions,
+            depth_range: 0.0 .. 1.0,
+        };
+
+        Arc::new(GraphicsPipeline::start()
+            .vertex_input(BufferlessDefinition {})
+            .vertex_shader(_vert_shader_module.main_entry_point(), ())
+            .triangle_list()
+            .primitive_restart(false)
+            .viewports(vec![viewport]) //NOTE: also sets scissor to cover whole viewport
+            .fragment_shader(_frag_shader_module.main_entry_point(), ())
+            .depth_clamp(false)
+            .polygon_mode_fill() //= default
+            .line_width(1.0) // = default
+            .cull_mode_back()
+            .front_face_clockwise()
+            .blend_pass_through()
+            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .build(device.clone())
+            .unwrap()
+        )
     }
 
     fn find_queue_families(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> QueueFamilyIndices {
@@ -341,23 +425,19 @@ impl HelloTriangleApplication {
         use std::iter::FromIterator;
         let unique_queue_families: HashSet<&i32> = HashSet::from_iter(families.iter());
 
-        // let queue_family = physical_device.queue_families()
-        //     .nth(indices.graphics_family as usize).unwrap();
-
         let queue_priority = 1.0;
         let queue_families = unique_queue_families.iter().map(|i| {
             (physical_device.queue_families().nth(**i as usize).unwrap(), queue_priority)
         });
 
-
         let (device, mut queues) = Device::new(physical_device, &Features::none(), 
-        &DeviceExtensions::none(), queue_families)
+        &device_extensions(), queue_families)
             .expect("failed to create logical device!");
 
-            let graphics_queue = queues.next().unwrap();
-            let present_queue = queues.next().unwrap_or_else(|| graphics_queue.clone());
+        let graphics_queue = queues.next().unwrap();
+        let present_queue = queues.next().unwrap_or_else(|| graphics_queue.clone());
 
-            (device, graphics_queue, present_queue)
+        (device, graphics_queue, present_queue)
     }
 
     #[allow(unused)]
@@ -382,6 +462,6 @@ impl HelloTriangleApplication {
 }
 
 fn main() {
-    let mut app = HelloTriangleApplication::initialize();
+    let mut _app = HelloTriangleApplication::initialize();
     //app.main_loop();
 }
