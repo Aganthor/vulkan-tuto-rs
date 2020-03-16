@@ -20,10 +20,13 @@ use vulkano::swapchain::{
     Swapchain,
     CompositeAlpha,
     FullscreenExclusive,
+    acquire_next_image,
+    SwapchainAcquireFuture,
+    AcquireError,
 };
 use vulkano::format::Format;
 use vulkano::image::{ImageUsage, swapchain::SwapchainImage};
-use vulkano::sync::SharingMode;
+use vulkano::sync::{self, SharingMode, GpuFuture};
 use vulkano::pipeline::{
     GraphicsPipeline,
     vertex::BufferlessDefinition,
@@ -113,6 +116,9 @@ struct HelloTriangleApplication {
     swap_chain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
+
+    previous_frame_end: Option<Box<GpuFuture>>,
+    recreate_swap_chain: bool,
 }
 
 impl HelloTriangleApplication {
@@ -125,12 +131,14 @@ impl HelloTriangleApplication {
         let (device, graphics_queue, present_queue) = Self::create_logical_device(&instance, &surface, physical_device_index);
 
         let (swap_chain, swap_chain_images) = Self::create_swap_chain(&instance, &surface, physical_device_index,
-            &device, &graphics_queue, &present_queue);
+            &device, &graphics_queue, &present_queue, None);
 
         let render_pass = Self::create_render_pass(&device, swap_chain.format());
         let graphics_pipeline = Self::create_graphics_pipeline(&device, swap_chain.dimensions(), &render_pass);
 
         let swap_chain_framebuffers = Self::create_framebuffers(&swap_chain_images, &render_pass);
+
+        let previous_frame_end = Some(Self::create_sync_objects(&device));
 
         let mut app = Self {
             instance,
@@ -154,6 +162,9 @@ impl HelloTriangleApplication {
             swap_chain_framebuffers,
 
             command_buffers: vec![],
+
+            previous_frame_end,
+            recreate_swap_chain: false,
         };
 
         app.create_command_buffers();
@@ -299,6 +310,7 @@ impl HelloTriangleApplication {
         device: &Arc<Device>,
         graphics_queue: &Arc<Queue>,
         present_queue: &Arc<Queue>,
+        old_swapchain: Option<Arc<Swapchain<Window>>>,
     ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
         let physical_device = PhysicalDevice::from_index(&instance, physical_device_index).unwrap();
         let capabilities = surface.capabilities(physical_device)
@@ -326,7 +338,7 @@ impl HelloTriangleApplication {
             graphics_queue.into()
         };
 
-        let (swap_chain, images) = Swapchain::new(
+        let (swap_chain, images) = Swapchain::with_old_swapchain(
             device.clone(),
             surface.clone(),
             image_count,
@@ -341,6 +353,7 @@ impl HelloTriangleApplication {
             FullscreenExclusive::Default,
             true, //clipped
             ColorSpace::SrgbNonLinear,
+            old_swapchain.expect("Failed to retrieve old swap chain")
         ).expect("failed to create a swap chain!");
 
         (swap_chain, images)
@@ -446,6 +459,10 @@ impl HelloTriangleApplication {
             .collect();
     }
 
+    fn create_sync_objects(device: &Arc<Device>) -> Box<GpuFuture> {
+        Box::new(sync::now(device.clone())) as Box<GpuFuture>
+    }
+
     fn find_queue_families(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> QueueFamilyIndices {
         let mut indices = QueueFamilyIndices::new();
         //TODO: replace index with id to simplify?
@@ -491,6 +508,59 @@ impl HelloTriangleApplication {
         let present_queue = queues.next().unwrap_or_else(|| graphics_queue.clone());
 
         (device, graphics_queue, present_queue)
+    }
+
+    fn draw_frame(&mut self) {
+        self.previous_frame_end.as_mut().unwrap().cleanup_finished();
+
+        if self.recreate_swap_chain {
+            self.recreate_swap_chain();
+            self.recreate_swap_chain = false;
+        }
+
+        let (image_index, suboptimal, acquire_future) = match acquire_next_image(self.swap_chain.clone(), None) {
+            Ok(r) => r,
+            Err(AcquireError::OutOfDate) => {
+                self.recreate_swap_chain = true;
+                return;
+            },
+            Err(e) => panic!("failed to acquire next image: {:?}", e)
+        };
+
+        let command_buffer = self.command_buffers[image_index].clone();
+
+        let future = self.previous_frame_end.take().unwrap()
+            .join(acquire_future)
+            .then_execute(self.graphics_queue.clone(), command_buffer)
+            .unwrap()
+            .then_swapchain_present(self.graphics_queue.clone(), self.swap_chain.clone(), image_index)
+            .then_signal_fence_and_flush();
+
+        match future {
+            Ok(future) => {
+                self.previous_frame_end = Some(Box::new(future) as Box<_>);
+            }
+            Err(vulkano::sync::FlushError::OutOfDate) => {
+                self.recreate_swap_chain = true;
+                self.previous_frame_end = Some(Box::new(vulkano::sync::now(self.device.clone())) as Box<_>);
+            }
+            Err(e) => {
+                println!("{:?}", e);
+                self.previous_frame_end = Some(Box::new(vulkano::sync::now(self.device.clone())) as Box<_>);
+            }
+        }
+    }
+
+    fn recreate_swap_chain(&mut self) {
+        let (swap_chain, images) = Self::create_swap_chain(&self.instance, &self.surface, self.physical_device_index,
+            &self.device, &self.graphics_queue, &self.present_queue, Some(self.swap_chain.clone()));
+        self.swap_chain = swap_chain;
+        self.swap_chain_images = images;
+
+        self.render_pass = Self::create_render_pass(&self.device, self.swap_chain.format());
+        self.graphics_pipeline = Self::create_graphics_pipeline(&self.device, self.swap_chain.dimensions(), &self.render_pass);
+        self.swap_chain_framebuffers = Self::create_framebuffers(&self.swap_chain_images, &self.render_pass);
+        self.create_command_buffers();
     }
 
     #[allow(unused)]
