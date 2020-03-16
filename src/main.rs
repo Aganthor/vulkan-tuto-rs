@@ -1,4 +1,3 @@
-#[macro_use]
 use std::sync::Arc;
 use std::collections::HashSet;
 
@@ -88,8 +87,8 @@ impl QueueFamilyIndices {
 }
 
 type ConcreteGraphicsPipeline = GraphicsPipeline<BufferlessDefinition, 
-                                                Box<PipelineLayoutAbstract + Send + Sync + 'static>, 
-                                                Arc<RenderPassAbstract + Send + Sync + 'static>>;
+                                                Box<dyn PipelineLayoutAbstract + Send + Sync + 'static>, 
+                                                Arc<dyn RenderPassAbstract + Send + Sync + 'static>>;
 
 #[allow(unused)]
 struct HelloTriangleApplication {
@@ -108,10 +107,10 @@ struct HelloTriangleApplication {
     swap_chain: Arc<Swapchain<Window>>,
     swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
 
-    render_pass: Arc<RenderPassAbstract + Send + Sync>,
+    render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
     graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
 
-    swap_chain_framebuffers: Vec<Arc<FramebufferAbstract + Send + Sync>>,
+    swap_chain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
 }
@@ -347,7 +346,7 @@ impl HelloTriangleApplication {
         (swap_chain, images)
     }
 
-    fn create_render_pass(device: &Arc<Device>, color_format: Format) -> Arc<RenderPassAbstract + Send + Sync> {
+    fn create_render_pass(device: &Arc<Device>, color_format: Format) -> Arc<dyn RenderPassAbstract + Send + Sync> {
         Arc::new(vulkano::single_pass_renderpass!(device.clone(),
             attachments: {
                 color: {
@@ -367,7 +366,7 @@ impl HelloTriangleApplication {
     fn create_graphics_pipeline(
         device: &Arc<Device>, 
         swap_chain_extent: [u32; 2], 
-        render_pass: &Arc<RenderPassAbstract + Send + Sync>,
+        render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>,
     ) -> Arc<ConcreteGraphicsPipeline> {
         mod vertex_shader {
             vulkano_shaders::shader! {
@@ -416,11 +415,11 @@ impl HelloTriangleApplication {
 
     fn create_framebuffers(
         swap_chain_images: &[Arc<SwapchainImage<Window>>],
-        render_pass: &Arc<RenderPassAbstract + Send + Sync>
-    ) -> Vec<Arc<FramebufferAbstract + Send + Sync>> {
+        render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>
+    ) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
         swap_chain_images.iter()
             .map(|image| {
-                let fba: Arc<FramebufferAbstract + Send + Sync> = Arc::new(Framebuffer::start(render_pass.clone())
+                let fba: Arc<dyn FramebufferAbstract + Send + Sync> = Arc::new(Framebuffer::start(render_pass.clone())
                     .add(image.clone()).unwrap()
                     .build().unwrap());
                 fba
