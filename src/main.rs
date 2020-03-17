@@ -49,9 +49,9 @@ use vulkano::command_buffer::{
 use vulkano_win::VkSurfaceBuild;
 
 use winit::{
-    event::{Event, WindowEvent},
+    event::{Event, WindowEvent, VirtualKeyCode, ElementState},
     event_loop::{ControlFlow, EventLoop},
-    window::{WindowBuilder, Window}, dpi::LogicalSize
+    window::{WindowBuilder, Window}, dpi::LogicalSize,
 };
 
 const WIDTH: u32 = 800;
@@ -117,8 +117,8 @@ struct HelloTriangleApplication {
 
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
 
-    previous_frame_end: Option<Box<GpuFuture>>,
-    recreate_swap_chain: bool,
+    previous_frame_end: Option<Box<dyn GpuFuture>>,
+    recreate_swapchain: bool,
 }
 
 impl HelloTriangleApplication {
@@ -164,7 +164,7 @@ impl HelloTriangleApplication {
             command_buffers: vec![],
 
             previous_frame_end,
-            recreate_swap_chain: false,
+            recreate_swapchain: false,
         };
 
         app.create_command_buffers();
@@ -338,25 +338,46 @@ impl HelloTriangleApplication {
             graphics_queue.into()
         };
 
-        let (swap_chain, images) = Swapchain::with_old_swapchain(
-            device.clone(),
-            surface.clone(),
-            image_count,
-            surface_format.0,
-            extent,
-            1,
-            image_usage,
-            sharing,
-            capabilities.current_transform,
-            CompositeAlpha::Opaque,
-            present_mode,
-            FullscreenExclusive::Default,
-            true, //clipped
-            ColorSpace::SrgbNonLinear,
-            old_swapchain.expect("Failed to retrieve old swap chain")
-        ).expect("failed to create a swap chain!");
+        if old_swapchain.is_none() {
+            let (swap_chain, images) = Swapchain::new(
+                device.clone(),
+                surface.clone(),
+                image_count,
+                surface_format.0,
+                extent,
+                1,
+                image_usage,
+                sharing,
+                capabilities.current_transform,
+                CompositeAlpha::Opaque,
+                present_mode,
+                FullscreenExclusive::Default,
+                true, //clipped
+                ColorSpace::SrgbNonLinear,
+            ).expect("failed to create a swap chain!");
 
-        (swap_chain, images)
+            (swap_chain, images)
+        } else {
+            let (swap_chain, images) = Swapchain::with_old_swapchain(
+                device.clone(),
+                surface.clone(),
+                image_count,
+                surface_format.0,
+                extent,
+                1,
+                image_usage,
+                sharing,
+                capabilities.current_transform,
+                CompositeAlpha::Opaque,
+                present_mode,
+                FullscreenExclusive::Default,
+                true, //clipped
+                ColorSpace::SrgbNonLinear,
+                old_swapchain.unwrap(),
+            ).expect("failed to create a swap chain!");            
+
+            (swap_chain, images)
+        }
     }
 
     fn create_render_pass(device: &Arc<Device>, color_format: Format) -> Arc<dyn RenderPassAbstract + Send + Sync> {
@@ -459,8 +480,8 @@ impl HelloTriangleApplication {
             .collect();
     }
 
-    fn create_sync_objects(device: &Arc<Device>) -> Box<GpuFuture> {
-        Box::new(sync::now(device.clone())) as Box<GpuFuture>
+    fn create_sync_objects(device: &Arc<Device>) -> Box<dyn GpuFuture> {
+        Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>
     }
 
     fn find_queue_families(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> QueueFamilyIndices {
@@ -513,15 +534,15 @@ impl HelloTriangleApplication {
     fn draw_frame(&mut self) {
         self.previous_frame_end.as_mut().unwrap().cleanup_finished();
 
-        if self.recreate_swap_chain {
+        if self.recreate_swapchain {
             self.recreate_swap_chain();
-            self.recreate_swap_chain = false;
+            self.recreate_swapchain = false;
         }
 
         let (image_index, suboptimal, acquire_future) = match acquire_next_image(self.swap_chain.clone(), None) {
             Ok(r) => r,
             Err(AcquireError::OutOfDate) => {
-                self.recreate_swap_chain = true;
+                self.recreate_swapchain = true;
                 return;
             },
             Err(e) => panic!("failed to acquire next image: {:?}", e)
@@ -541,7 +562,7 @@ impl HelloTriangleApplication {
                 self.previous_frame_end = Some(Box::new(future) as Box<_>);
             }
             Err(vulkano::sync::FlushError::OutOfDate) => {
-                self.recreate_swap_chain = true;
+                self.recreate_swapchain = true;
                 self.previous_frame_end = Some(Box::new(vulkano::sync::now(self.device.clone())) as Box<_>);
             }
             Err(e) => {
@@ -569,14 +590,31 @@ impl HelloTriangleApplication {
             *control_flow = ControlFlow::Poll;
 
             match event {
-                Event::WindowEvent {event: WindowEvent::CloseRequested, ..} => {
-                    *control_flow = ControlFlow::Exit
+                Event::WindowEvent {window_id, event } => {
+                    match event {
+                        WindowEvent::CloseRequested => {
+                            *control_flow = ControlFlow::Exit
+                        }
+                        WindowEvent::KeyboardInput { input, .. } => {
+                            if let (Some(VirtualKeyCode::Escape), ElementState::Pressed) = (input.virtual_keycode, input.state) {
+                                println!("Exiting due to escape press...");
+                                *control_flow = ControlFlow::Exit;
+                            }
+                        }
+                        WindowEvent::Resized(size) => {
+                            //The window has been resized...
+                        }
+                        _ => ()
+                    }
                 },
                 Event::MainEventsCleared => {
-                    //Application update code.
+                    //Application update code (game engine state, physics, etc.)
                 },
                 Event::RedrawRequested(_) => {
-                    //Redraw...
+                    //Emitted after MainEventsCleared... Ready to draw frame.
+                },
+                Event::RedrawEventsCleared => {
+                    //Emitted after RedrawRequested... Post draw frame stuff goes here.
                 },
                 _ => ()
             }
