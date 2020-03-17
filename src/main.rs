@@ -98,7 +98,6 @@ struct HelloTriangleApplication {
     instance: Arc<Instance>,
     debug_callback: Option<DebugCallback>,
 
-    event_loop: EventLoop<()>,
     surface: Arc<Surface<Window>>,
 
     physical_device_index: usize, //Can't store PhysicalDevice directly (lifetime issues)
@@ -122,7 +121,7 @@ struct HelloTriangleApplication {
 }
 
 impl HelloTriangleApplication {
-    pub fn initialize() -> Self {
+    pub fn initialize() -> (Self, EventLoop<()>) {
         let instance = Self::create_instance();
         let debug_callback = Self::setup_debug_callback(&instance);
         let (event_loop, surface) = Self::create_surface(&instance);
@@ -144,7 +143,6 @@ impl HelloTriangleApplication {
             instance,
             debug_callback,
 
-            event_loop,
             surface,
 
             physical_device_index,
@@ -168,7 +166,7 @@ impl HelloTriangleApplication {
         };
 
         app.create_command_buffers();
-        app
+        (app, event_loop)
     }
 
     fn create_instance() -> Arc<Instance> {
@@ -585,8 +583,9 @@ impl HelloTriangleApplication {
     }
 
     #[allow(unused)]
-    fn main_loop(self) {
-        self.event_loop.run(move |event, _, control_flow| {
+    fn main_loop(mut self, event_loop: EventLoop<()>) {
+        //self.event_loop.run(move |event, _, control_flow| {
+        event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Poll;
 
             match event {
@@ -603,6 +602,7 @@ impl HelloTriangleApplication {
                         }
                         WindowEvent::Resized(size) => {
                             //The window has been resized...
+                            self.recreate_swapchain = true;
                         }
                         _ => ()
                     }
@@ -624,6 +624,6 @@ impl HelloTriangleApplication {
 }
 
 fn main() {
-    let app = HelloTriangleApplication::initialize();
-    app.main_loop();
+    let (mut app, event_loop) = HelloTriangleApplication::initialize();
+    HelloTriangleApplication::main_loop(app, event_loop);
 }
