@@ -612,6 +612,7 @@ impl HelloTriangleApplication {
                 },
                 Event::RedrawRequested(_) => {
                     //Emitted after MainEventsCleared... Ready to draw frame.
+                    self.draw_frame();
                 },
                 Event::RedrawEventsCleared => {
                     //Emitted after RedrawRequested... Post draw frame stuff goes here.
