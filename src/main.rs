@@ -30,8 +30,6 @@ use vulkano::sync::{self, SharingMode, GpuFuture};
 use vulkano::pipeline::{
     GraphicsPipeline,
     GraphicsPipelineAbstract,
-    //vertex::BufferlessDefinition,
-    //vertex::BufferlessVertices,
     viewport::Viewport,
 };
 use vulkano::framebuffer::{
@@ -48,8 +46,10 @@ use vulkano::command_buffer::{
 };
 use vulkano::buffer::{
     cpu_access::CpuAccessibleBuffer,
+    ImmutableBuffer,
     BufferUsage,
     BufferAccess,
+    TypedBufferAccess,
 };
 
 use vulkano_win::VkSurfaceBuild;
@@ -94,10 +94,6 @@ impl QueueFamilyIndices {
         self.graphics_family >= 0 && self.present_family >= 0
     }
 }
-
-//type ConcreteGraphicsPipeline = GraphicsPipeline<BufferlessDefinition, 
-//                                                Box<dyn PipelineLayoutAbstract + Send + Sync + 'static>, 
-//                                                Arc<dyn RenderPassAbstract + Send + Sync + 'static>>;
 
 #[derive(Default, Copy, Clone)]
 struct Vertex {
@@ -165,7 +161,7 @@ impl HelloTriangleApplication {
 
         let swap_chain_framebuffers = Self::create_framebuffers(&swap_chain_images, &render_pass);
 
-        let vertex_buffer = Self::create_vertex_buffer(&device);
+        let vertex_buffer = Self::create_vertex_buffer(&graphics_queue);
 
         let previous_frame_end = Some(Self::create_sync_objects(&device));
 
@@ -491,9 +487,12 @@ impl HelloTriangleApplication {
         ).collect::<Vec<_>>()
     }
 
-    fn create_vertex_buffer(device: &Arc<Device>) -> Arc<dyn BufferAccess + Send + Sync> {
-        CpuAccessibleBuffer::from_iter(device.clone(),
-            BufferUsage::vertex_buffer(), false, vertices().iter().cloned()).unwrap()
+    fn create_vertex_buffer(graphics_queue: &Arc<Queue>) -> Arc<dyn BufferAccess + Send + Sync> {
+        let (buffer, future) = ImmutableBuffer::from_iter(
+            vertices().iter().cloned(), BufferUsage::vertex_buffer(),
+            graphics_queue.clone()).unwrap();
+        future.flush().unwrap();
+        buffer
     }
 
     fn create_command_buffers(&mut self) {
